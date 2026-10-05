@@ -2209,12 +2209,12 @@ async function processEmails(args) {
                 }
             }
         }
-    }
 
-    // Batched spam check: all queued mails are analyzed in chunks of
-    // spamfilter_batch_size emails with a single AI call per chunk.
-    if (spamFilter && spamQueue.length > 0 && !taBatchController.isCancelled()) {
-        await _processSpamBatchQueue(spamQueue, prefs_aats);
+        // Batched spam check: all queued mails are analyzed in chunks of
+        // spamfilter_batch_size emails with a single AI call per chunk.
+        if (spamFilter && spamQueue.length > 0 && !taBatchController.isCancelled()) {
+            await _processSpamBatchQueue(spamQueue, prefs_aats);
+        }
     }
 
     if (summarize && !taBatchController.isCancelled()) {
