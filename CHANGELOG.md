@@ -2,6 +2,15 @@
 
 
 
+<h2>Unreleased</h2>
+      <ul>
+        <li><i>[OpenAI Comp API]</i> Fix: the API URL is built correctly when the host already contains a version segment (e.g. Z.ai <code>https://api.z.ai/api/paas/v4</code>), no more duplicated <code>/v1</code> path segments.</li>
+        <li><i>[OpenAI Comp API]</i> Added a <b>Z.ai</b> preconfigured service.</li>
+        <li><i>[OpenAI Comp API]</i> Reasoning streamed via the <code>reasoning_content</code> field (e.g. GLM models) is now rendered in the thinking block instead of being discarded.</li>
+        <li><i>[OpenAI Comp API]</i> The host permission for custom APIs now covers the whole origin, and the "update models" button asks for the missing permission automatically.</li>
+        <li><i>[OpenAI Comp API]</i> API errors now include the final request URL, to easily spot misconfigured paths.</li>
+        <li>Added a minimal test suite for the OpenAI Comp API URL building, permission patterns and service presets (<code>node --test</code>).</li>
+      </ul>
 <h2>Version 4.1.1 - 19/07/2026</h2>
       <ul>
         <li><i>[All APIs]</i> In the API webchat is now possible to zoom the text using CTRL+ CTRL- and resetting the dimension with CTRL0 [<a href="https://github.com/micz/ThunderAI/issues/805">#805</a>].</li>

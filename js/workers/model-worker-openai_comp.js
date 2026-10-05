@@ -65,6 +65,8 @@ self.onmessage = async function(event) {
                 }catch(e){
                     error_message = response.statusText;
                 }
+                // Include the final request URL so a wrongly assembled path is immediately visible.
+                error_message = "URL: " + response.url + " — " + error_message;
                 taLog.log("error_message: " + JSON.stringify(error_message));
             }
             postMessage({ type: 'error', payload: i18nStrings["OpenAIComp_api_request_failed"] + ": " + response.status + " " + response.statusText + ", Detail: " + error_message + " " + errorDetail });
@@ -128,6 +130,13 @@ self.onmessage = async function(event) {
                 }
                 const { delta } = choices[0];
                 const { content } = delta;
+                // Some providers (e.g. Z.ai GLM models) stream reasoning in a
+                // dedicated "reasoning_content" field instead of <think> tags.
+                // Forward it as a thinking token so the webchat UI renders the
+                // thinking block instead of appearing to hang.
+                if (delta.reasoning_content) {
+                    postMessage({ type: 'newThinkingToken', payload: { token: delta.reasoning_content } });
+                }
                 // Update the UI with the new content
                 if (content) {
                     assistantResponseAccumulator += content;

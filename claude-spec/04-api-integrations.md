@@ -39,7 +39,9 @@ Content script `js/lib/diff.js` is injected into ChatGPT pages for diff-view sup
 - Module: `js/api/openai_comp.js`
 - Worker: `js/workers/model-worker-openai_comp.js`
 - Settings keys: `openai_comp_host`, `openai_comp_model`, `openai_comp_api_key`, `openai_comp_use_v1`, `openai_comp_chat_name`, `openai_comp_temperature`
-- Pre-configured providers: `js/api/openai_comp_configs.js` (`custom`, DeepSeek, Grok, Mistral, OpenRouter, Perplexity — `custom` is the default/manual entry)
+- Pre-configured providers: `js/api/openai_comp_configs.js` (`custom`, Z.ai, DeepSeek, Grok, Mistral, OpenRouter, Perplexity — `custom` is the default/manual entry)
+- **URL building**: both requests (GET `/models`, POST `/chat/completions`) go through `OpenAIComp.buildApiUrl()`. The `/v1` segment is only appended when `use_v1` is true **and** the host doesn't already end with a version segment (`/v<digits>`, e.g. `https://api.z.ai/api/paas/v4`). This prevents malformed paths like `/api/paas/v4/v1/chat/completions`.
+- **Host permission**: before fetching models, the connection UI checks/requests a permission pattern covering the **whole origin** of the host (`getOriginPermissionPattern()` in `js/mzta-utils.js`, e.g. `https://api.z.ai/*`), so all API paths of that host are covered. The same pattern is used by the "give permission" buttons and the CORS-warning permission checks. Failed requests log/emit the final `response.url` so a wrongly assembled path is immediately visible.
 
 ### Google Gemini (`google_gemini_api`)
 - Module: `js/api/google_gemini.js`
@@ -56,7 +58,7 @@ Content script `js/lib/diff.js` is injected into ChatGPT pages for diff-view sup
 
 Two provider categories emit reasoning/thinking content:
 
-- **OpenAI Compatible**: thinking arrives inline in the normal token stream wrapped in `<think>…</think>` tags. `StreamingMessage.flush()` (in `api_webchat/streamingMessage.js`) strips these blocks from the rendered text; `renderThinkingBlock()` (in `api_webchat/thinkingBlock.js`) renders them as a `<details class="thinking-block">` prepended to the answer. If an unterminated `<think>` is detected mid-stream, the flush is deferred until the closing tag arrives.
+- **OpenAI Compatible**: thinking arrives either inline in the normal token stream wrapped in `<think>…</think>` tags, or as a dedicated `delta.reasoning_content` SSE field (e.g. Z.ai GLM models). The worker forwards `reasoning_content` chunks as `newThinkingToken` messages. `StreamingMessage.flush()` (in `api_webchat/streamingMessage.js`) strips inline `<think>` blocks from the rendered text; `renderThinkingBlock()` (in `api_webchat/thinkingBlock.js`) renders them as a `<details class="thinking-block">` prepended to the answer. If an unterminated `<think>` is detected mid-stream, the flush is deferred until the closing tag arrives. In special commands, `mzta_specialCommand.sendPrompt()` ignores `newThinkingToken` messages (reasoning is not part of the returned result).
 - **Ollama / Anthropic**: thinking is captured in the worker as a dedicated field (`message.thinking` for Ollama, `thinking_delta` events for Anthropic) and posted to the controller as `newThinkingToken`. `StreamingMessage` accumulates it and it is rendered into the same `<details>` block on final flush. Ollama's reasoning is enabled by the `ollama_think` pref, which sets `think: true` on the request.
 
 See the [API WebChat](01-architecture.md#api-webchat-api_webchat) section for the module structure behind this.
