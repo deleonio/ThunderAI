@@ -962,6 +962,13 @@ switch (message.command) {
       return Promise.resolve(true);
     }
 
+    case "reloadSpamReport": {
+      // The background finished (batch-)processing spam checks: re-load the
+      // stored report of the currently displayed message once.
+      browser.runtime.sendMessage({ command: "checkSpamReport" }).catch(() => {});
+      return Promise.resolve(true);
+    }
+
     case "showSpamCheckInProgress": {
       _removePanel('mzta-spam-report-banner');
       _removeToolbarItem('mzta-toolbar-spam');

@@ -897,7 +897,10 @@ async function _applySpamVerdict(item, spamValue, explanation, prefs) {
     }
 
     spamReport.saveReportData(report_data, message.headerMessageId);
-    await updateSpamPanel(message.headerMessageId, "showSpamReport", report_data);
+    // No live panel update here on purpose: pushing one message per result into
+    // the message display makes the UI flicker during batches. Reports are
+    // stored and shown when the mail is displayed; the background sends a single
+    // "reloadSpamReport" to the active tab once the whole batch is done.
 }
 
 // Analyzes the queued emails in chunks: one AI call per spamfilter_batch_size
@@ -2214,6 +2217,12 @@ async function processEmails(args) {
         // spamfilter_batch_size emails with a single AI call per chunk.
         if (spamFilter && spamQueue.length > 0 && !taBatchController.isCancelled()) {
             await _processSpamBatchQueue(spamQueue, prefs_aats);
+            // A single panel refresh after the whole batch (results are stored
+            // and reloaded by the display script) — avoids per-result flicker.
+            let activeTabs = await browser.tabs.query({ active: true, currentWindow: true });
+            for (const tab of activeTabs) {
+                browser.tabs.sendMessage(tab.id, { command: "reloadSpamReport" }).catch(() => {});
+            }
         }
     }
 
