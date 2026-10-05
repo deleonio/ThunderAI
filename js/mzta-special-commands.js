@@ -187,6 +187,10 @@
                     case 'newToken':
                         this.full_message += payload.token;
                         break;
+                    case 'newThinkingToken':
+                        // Reasoning tokens are only rendered in the API webchat window;
+                        // ignore them here so the log stays clean (same as the Ollama worker).
+                        break;
                     case 'tokensDone':
                         clearTimer();
                         this.logger.log("tokensDone: " + this.full_message);

@@ -45,6 +45,18 @@ export class OpenAIComp {
   }
 
 
+  // Builds the final API URL. The "/v1" path segment is only appended when
+  // requested AND the host doesn't already end with a version segment
+  // (e.g. "https://api.z.ai/api/paas/v4" or "https://example.com/v1"), so the
+  // path is never duplicated ("/v4/v1/...").
+  buildApiUrl = (endpointPath) => {
+    let base = (this.host || '').trim().replace(/\/+$/, "");
+    if (this.use_v1 && !/\/v\d+$/.test(base)) {
+      base += "/v1";
+    }
+    return base + endpointPath;
+  }
+
   fetchModels = async () => {
     const curr_headers = {
       "Content-Type": "application/json",
@@ -56,14 +68,14 @@ export class OpenAIComp {
       curr_headers['X-Title'] = 'ThunderAI';
     }
 
-    const response = await fetch(this.host + (this.use_v1 ? "/v1" : "") + "/models", {
+    const response = await fetch(this.buildApiUrl("/models"), {
         method: "GET",
         headers: curr_headers,
     });
 
     if (!response.ok) {
         const errorDetail = await response.text();
-        let err_msg = "[ThunderAI] OpenAI API Comp request failed: " + response.status + " " + response.statusText + ", Detail: " + errorDetail;
+        let err_msg = "[ThunderAI] OpenAI API Comp request failed: " + response.status + " " + response.statusText + ", URL: " + response.url + ", Detail: " + errorDetail;
         console.error(err_msg);
         let output = {};
         output.ok = false;
@@ -88,7 +100,7 @@ export class OpenAIComp {
       if(this.apiKey !== '') curr_headers["Authorization"] = "Bearer "+ this.apiKey;
 
       try {
-        const response = await fetch(this.host + (this.use_v1 ? "/v1" : "") + "/chat/completions", {
+        const response = await fetch(this.buildApiUrl("/chat/completions"), {
             method: "POST",
             headers: curr_headers,
             body: JSON.stringify({ 
