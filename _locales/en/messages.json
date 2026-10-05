@@ -1324,6 +1324,14 @@
     "message": "If checked, the AI will only add tags to emails received in the inbox folder.",
     "description": ""
   },
+  "prefs_OptionText_add_tags_sender_cache": {
+    "message": "Reuse results from the same sender",
+    "description": ""
+  },
+  "prefs_OptionText_add_tags_sender_cache_Info": {
+    "message": "If checked, the tags are requested from the AI only once per sender: further emails from the same sender get the same tags without a new AI call. Cached results are kept for 30 days.",
+    "description": ""
+  },
   "prefs_OptionText_add_tags_use_specific_integration_Info": {
     "message": "If checked, the Model and API specified below will be used for adding tags to emails, regardless the one choosen in the ThunderAI options page.",
     "description": ""
@@ -1450,6 +1458,26 @@
   },
   "prefs_OptionText_spamfilter_only_inbox_Info": {
     "message": "When enabled, the automatic spam filter only checks messages received in the inbox folder and ignores mail delivered to other folders.",
+    "description": ""
+  },
+  "prefs_OptionText_spamfilter_sender_cache": {
+    "message": "Reuse results from the same sender",
+    "description": ""
+  },
+  "prefs_OptionText_spamfilter_sender_cache_Info": {
+    "message": "If checked, the spam check runs only once per sender: further emails from the same sender reuse the stored verdict without a new AI call. Cached results are kept for 30 days.",
+    "description": ""
+  },
+  "prefs_OptionText_spamfilter_batch_size": {
+    "message": "Emails per AI call",
+    "description": ""
+  },
+  "prefs_OptionText_spamfilter_batch_size_Info": {
+    "message": "How many emails are analyzed together in a single AI call when checking multiple emails at once (batch mode). Lower values give more detailed explanations, higher values save tokens.",
+    "description": ""
+  },
+  "spamfilter_batch_prompt": {
+    "message": "You are an email spam analysis assistant. Analyze each of the following $2 emails and rate for every single one the probability that it is unsolicited spam (spamValue from 0 to 100), together with a short explanation (one sentence maximum). Judge every email independently on its own content.\n\n$1\n\nRespond ONLY with a JSON object in exactly this format and nothing else:\n{\"results\":[{\"index\":1,\"spamValue\":0,\"explanation\":\"...\"},{\"index\":2,\"spamValue\":0,\"explanation\":\"...\"}]}\nThe index must match the EMAIL number above. Provide one entry for every email.",
     "description": ""
   },
   "spamfilter_threshold_too_low": {
