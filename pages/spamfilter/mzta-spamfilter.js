@@ -123,6 +123,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         browser.runtime.sendMessage({command: "reload_menus"});
     });
 
+    // Sender cache: wipe all stored per-sender spam verdicts.
+    document.getElementById('btn_clear_sender_cache').addEventListener('click', async () => {
+        if (!confirm(browser.i18n.getMessage('SpamFilter_ClearSenderCache_Confirm'))) {
+            return;
+        }
+        await browser.storage.local.set({ sender_cache: {} });
+        const info = document.getElementById('sender_cache_cleared_info');
+        if (info) {
+            info.style.display = 'inline';
+            setTimeout(() => { info.style.display = 'none'; }, 5000);
+        }
+    });
+
     if(spamfilter_prompt.text === 'prompt_spamfilter_full_text'){
         spamfilter_prompt.text = browser.i18n.getMessage(spamfilter_prompt.text);
     }

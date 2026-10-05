@@ -122,6 +122,7 @@ export const prefs_default = {
     max_prompt_length: 30000,   // max string length for prompt
     add_tags: false,
     add_tags_maxnum: 3,
+    add_tags_sender_cache: true,   // reuse the tags of previously analyzed mails from the same sender
     add_tags_hide_exclusions: false,
     add_tags_exclusions_exact_match: false,
     add_tags_first_uppercase: true,
@@ -144,6 +145,8 @@ export const prefs_default = {
     spamfilter_skip_addresses: [],
     spamfilter_skip_addressbook: true,
     spamfilter_show_msg_panel: true,
+    spamfilter_sender_cache: true,   // reuse the spam verdict of previously analyzed mails from the same sender
+    spamfilter_batch_size: 10,       // emails analyzed per AI call during batch spam checks
     spamfilter_only_inbox: false,   // If true, auto spam filter runs only on inbox folders
     summarize: false,
     summarize_auto: 1,                   // 0: disabled, 1: manual button, 2: automatic on message open, 3: generate on email receive

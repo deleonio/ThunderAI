@@ -53,6 +53,24 @@
               </label>
             </td>
           </tr>
+          <tr class="spamfilter_tr">
+            <td><span class="opt_title">__MSG_prefs_OptionText_spamfilter_sender_cache__</span></td>
+            <td>
+              <label>
+                <input type="checkbox" id="spamfilter_sender_cache" name="spamfilter_sender_cache" class="option-input" />
+                __MSG_prefs_OptionText_spamfilter_sender_cache_Info__
+              </label>
+            </td>
+          </tr>
+          <tr class="spamfilter_tr">
+            <td><span class="opt_title">__MSG_prefs_OptionText_spamfilter_batch_size__</span></td>
+            <td>
+              <label>
+                <input type="number" id="spamfilter_batch_size" name="spamfilter_batch_size" min="1" max="50" class="option-input" />
+                __MSG_prefs_OptionText_spamfilter_batch_size_Info__
+              </label>
+            </td>
+          </tr>
 
     </table>
     <div id="spamfilter_container">
@@ -81,6 +99,8 @@
         <br><textarea id="spamfilter_skip_addresses" rows="7"></textarea>
         <div class="btn_div"><button id="btn_save_skip_addresses" disabled>__MSG_save__</button></div>
         <br><label><input type="checkbox" id="spamfilter_skip_addressbook" name="spamfilter_skip_addressbook" /> <span class="opt_title">__MSG_prefs_OptionText_spamfilter_skip_addressbook__</span><br>__MSG_prefs_OptionText_spamfilter_skip_addressbook_Info__</label>
+        <div class="btn_div"><button id="btn_clear_sender_cache">__MSG_SpamFilter_ClearSenderCache__</button></div>
+        <span class="infoline" id="sender_cache_cleared_info" style="display: none;">__MSG_SpamFilter_ClearSenderCache_Done__</span>
     </div>
     <div id="spamfitler_reports_container">
       <div><span  class="section_title">__MSG_SpamReport_Title__</span></div>

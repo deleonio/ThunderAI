@@ -10,6 +10,8 @@
         <li><i>[OpenAI Comp API]</i> The host permission for custom APIs now covers the whole origin, and the "update models" button asks for the missing permission automatically.</li>
         <li><i>[OpenAI Comp API]</i> API errors now include the final request URL, to easily spot misconfigured paths.</li>
         <li>Added a minimal test suite for the OpenAI Comp API URL building, permission patterns and service presets (<code>node --test</code>).</li>
+        <li><i>[Spam Filter]</i> <b>Batched spam check:</b> when processing multiple emails, up to <code>spamfilter_batch_size</code> emails (default 10, configurable) are analyzed in a single AI call instead of one call per email — much faster and far fewer tokens.</li>
+        <li><i>[Spam Filter / Add Tags]</i> <b>Sender cache:</b> the result is requested from the AI only once per sender; further emails from the same sender reuse the stored verdict/tags without a new AI call (kept for 30 days, both features can be disabled in their settings pages).</li>
       </ul>
 <h2>Version 4.1.1 - 19/07/2026</h2>
       <ul>

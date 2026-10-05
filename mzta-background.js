@@ -63,6 +63,8 @@ import { taSummaryStore } from './js/mzta-summarystore.js';
 import { taTranslationStore } from './js/mzta-translationstore.js';
 import { taWorkingStatus } from './js/mzta-working-status.js';
 import { taBatchController } from './js/mzta-batch-controller.js';
+import { getCachedSenderData, setCachedSenderData } from './js/mzta-sender-cache.js';
+import { buildSpamBatchEmails, parseSpamBatchResponse } from './js/mzta-spam-batch.js';
 import {
     addTags_getExclusionList,
     checkExcludedTag
@@ -837,6 +839,141 @@ async function _generateTranslationForMessage(headerMessageId, tabId = null, opt
 }
 
 // options.messageData: { message, fullMessage, body_text, msg_text } — pass pre-fetched data to avoid re-querying
+// Saves a spam report that skips the AI (skip list / address book) with spamValue 0.
+async function _saveSpamSkipReport(message, curr_fullMessage, explanation_msg_key, prefs) {
+    let report_data = {};
+    report_data.report_date = new Date();
+    report_data.headerMessageId = message.headerMessageId;
+    report_data.spamValue = 0;
+    report_data.explanation = browser.i18n.getMessage(explanation_msg_key);
+    report_data.subject = curr_fullMessage?.headers?.subject || '';
+    report_data.from = curr_fullMessage?.headers?.from || message.author || '';
+    report_data.message_date = new Date(message.date);
+    report_data.moved = false;
+    report_data.SpamThreshold = prefs.spamfilter_threshold || prefs_init.spamfilter_threshold;
+    spamReport.saveReportData(report_data, message.headerMessageId);
+    await updateSpamPanel(message.headerMessageId, "showSpamReport", report_data);
+}
+
+// True when the sender address is in any address book (needs the addressBooks permission).
+async function _senderInAddressBook(senderEmail) {
+    try {
+        let hasPermission = await browser.permissions.contains({ permissions: ["addressBooks"] });
+        if (!hasPermission) return false;
+        let matchingContacts = await browser.contacts.quickSearch({ searchString: senderEmail });
+        return matchingContacts.some(contact => {
+            let props = contact.properties;
+            return (props.PrimaryEmail && props.PrimaryEmail.toLowerCase() === senderEmail) ||
+                   (props.SecondEmail && props.SecondEmail.toLowerCase() === senderEmail);
+        });
+    } catch (err) {
+        taLog.error("Error checking address book for sender: " + err);
+        return false; // Fail open — continue with normal spam check
+    }
+}
+
+// Applies a spam verdict of the batched check to a single queued email:
+// builds the report, applies the auto-move and refreshes the message pane.
+async function _applySpamVerdict(item, spamValue, explanation, prefs) {
+    const message = item.message;
+    let report_data = {};
+    report_data.report_date = new Date();
+    report_data.headerMessageId = message.headerMessageId;
+    report_data.spamValue = spamValue;
+    report_data.explanation = explanation;
+    report_data.subject = item.fullMessage?.headers?.subject || '';
+    report_data.from = item.fullMessage?.headers?.from || message.author || '';
+    report_data.message_date = new Date(message.date);
+    report_data.moved = false;
+    report_data.SpamThreshold = prefs.spamfilter_threshold || prefs_init.spamfilter_threshold;
+
+    if (spamValue >= report_data.SpamThreshold) {
+        taLog.log("Marking as spam [" + message.headerMessageId + "]");
+        messenger.messages.update(message.id, { junk: true });
+        let spamFolder = await messenger.folders.query({ accountId: message.folder.accountId, specialUse: ['junk'] });
+        messenger.messages.move([message.id], spamFolder[0].id);
+        report_data.moved = true;
+        taLog.log("Marked as spam [" + message.headerMessageId + "]");
+    }
+
+    spamReport.saveReportData(report_data, message.headerMessageId);
+    // No live panel update here on purpose: pushing one message per result into
+    // the message display makes the UI flicker during batches. Reports are
+    // stored and shown when the mail is displayed; the background sends a single
+    // "reloadSpamReport" to the active tab once the whole batch is done.
+}
+
+// Analyzes the queued emails in chunks: one AI call per spamfilter_batch_size
+// emails, falling back to the per-mail analysis when a chunk response cannot
+// be parsed or single mails are missing from the response.
+async function _processSpamBatchQueue(queue, prefs) {
+    const chunkSize = Math.min(50, Math.max(1, parseInt(prefs.spamfilter_batch_size, 10) || 10));
+    for (let i = 0; i < queue.length; i += chunkSize) {
+        if (taBatchController.isCancelled()) break;
+        const chunk = queue.slice(i, i + chunkSize);
+        await _analyzeSpamChunk(chunk, prefs);
+        taBatchController.tick();
+    }
+}
+
+async function _analyzeSpamChunk(chunk, prefs) {
+    const curr_prompt_spamfilter = await getSpamFilterPrompt();
+    const prompt = browser.i18n.getMessage('spamfilter_batch_prompt', [
+        buildSpamBatchEmails(chunk),
+        String(chunk.length),
+    ]);
+    const cmd = new mzta_specialCommand({
+        prompt: prompt,
+        llm: getConnectionType(prefs, curr_prompt_spamfilter, 'spamfilter'),
+        custom_model: curr_prompt_spamfilter.model ? curr_prompt_spamfilter.model : '',
+        do_debug: prefs.do_debug,
+        config: curr_prompt_spamfilter
+    });
+
+    let results = null;
+    try {
+        await cmd.initWorker();
+        const aiResponse = await cmd.sendPrompt();
+        taLog.log("[ThunderAI | SpamFilter batch] Response received for " + chunk.length + " emails.");
+        results = parseSpamBatchResponse(aiResponse);
+    } catch (err) {
+        taLog.error("[ThunderAI | SpamFilter batch] AI call failed: " + err);
+    }
+
+    const fallback = [];
+    if (results) {
+        for (let i = 0; i < chunk.length; i++) {
+            const item = chunk[i];
+            const verdict = results.get(i + 1);
+            if (!verdict) {
+                fallback.push(item);
+                continue;
+            }
+            await _applySpamVerdict(item, verdict.spamValue, verdict.explanation, prefs);
+            try {
+                await setCachedSenderData(item.senderEmail, 'spam', { spamValue: verdict.spamValue, explanation: verdict.explanation });
+            } catch (err) {
+                taLog.error("[ThunderAI | SpamFilter batch] Sender cache write failed: " + err);
+            }
+        }
+    } else {
+        taLog.warn("[ThunderAI | SpamFilter batch] No usable batch response, falling back to the per-mail analysis.");
+        fallback.push(...chunk);
+    }
+
+    for (const item of fallback) {
+        if (taBatchController.isCancelled()) break;
+        // Sender skip checks were already applied when queueing.
+        await _generateSpamReportForMessage(item.message.headerMessageId, {
+            messageData: { message: item.message, fullMessage: item.fullMessage, body_text: item.body_text, msg_text: item.msg_text },
+            prefs: prefs,
+            autoMove: true,
+            skip_addresses: [],
+            skip_addressbook: false
+        });
+    }
+}
+
 // options.prefs: pass pre-fetched prefs to avoid re-querying
 // options.autoMove: if true, move spam messages to junk folder (default: false)
 async function _generateSpamReportForMessage(headerMessageId, options = {}) {
@@ -846,6 +983,7 @@ async function _generateSpamReportForMessage(headerMessageId, options = {}) {
             do_debug: prefs_default.do_debug,
             default_chatgpt_lang: prefs_default.default_chatgpt_lang,
             spamfilter_threshold: prefs_default.spamfilter_threshold,
+            spamfilter_sender_cache: prefs_default.spamfilter_sender_cache,
             ...getDynamicSettingsDefaults(['use_specific_integration', 'connection_type']),
         });
 
@@ -877,7 +1015,7 @@ async function _generateSpamReportForMessage(headerMessageId, options = {}) {
             }
         }
 
-        // Extract sender email for skip checks
+        // Extract sender email for skip checks and sender cache
         let senderEmail = (message.author.match(/[\w.-]+@[\w.-]+\.\w+/) || [''])[0].toLowerCase();
 
         // Check if sender is in the skip addresses list
@@ -938,6 +1076,23 @@ async function _generateSpamReportForMessage(headerMessageId, options = {}) {
             }
         }
 
+        // Sender cache: reuse the verdict of previously analyzed mails from the
+        // same sender instead of running the AI prompt again for every mail.
+        let jsonObj = null;
+        if (prefs.spamfilter_sender_cache) {
+            try {
+                const cachedVerdict = await getCachedSenderData(senderEmail, 'spam');
+                if (cachedVerdict) {
+                    taLog.log("[ThunderAI] SpamFilter sender cache hit for " + senderEmail + ", skipping the AI call.");
+                    jsonObj = { ...cachedVerdict, fromCache: true };
+                }
+            } catch (err) {
+                taLog.error("[ThunderAI] SpamFilter sender cache read failed, falling back to the AI call: " + err);
+                jsonObj = null;
+            }
+        }
+
+        if (!jsonObj) {
         let curr_prompt_spamfilter = await getSpamFilterPrompt();
         let chatgpt_lang = await taPromptUtils.getDefaultLang(curr_prompt_spamfilter);
         let specialFullPrompt_spamfilter = await taPromptUtils.preparePrompt({
@@ -982,6 +1137,13 @@ async function _generateSpamReportForMessage(headerMessageId, options = {}) {
             return { success: false };
         }
         taLog.log("SpamFilter jsonObj: " + JSON.stringify(jsonObj));
+
+        // Store the fresh verdict in the sender cache so further mails from the
+        // same sender skip the AI call.
+        if (senderEmail) {
+            await setCachedSenderData(senderEmail, 'spam', { spamValue: jsonObj.spamValue, explanation: jsonObj.explanation });
+        }
+        }
 
         let report_data = {};
         report_data.report_date = new Date();
@@ -1825,9 +1987,12 @@ async function processEmails(args) {
             add_tags_exclusions_exact_match: prefs_default.add_tags_exclusions_exact_match,
             add_tags_auto_uselist: prefs_default.add_tags_auto_uselist,
             add_tags_auto_uselist_list: prefs_default.add_tags_auto_uselist_list,
+            add_tags_sender_cache: prefs_default.add_tags_sender_cache,
             spamfilter_enabled_accounts: prefs_default.spamfilter_enabled_accounts,
             spamfilter_skip_addresses: prefs_default.spamfilter_skip_addresses,
             spamfilter_skip_addressbook: prefs_default.spamfilter_skip_addressbook,
+            spamfilter_sender_cache: prefs_default.spamfilter_sender_cache,
+            spamfilter_batch_size: prefs_default.spamfilter_batch_size,
             spamfilter_only_inbox: prefs_default.spamfilter_only_inbox,
             ...getDynamicSettingsDefaults(['use_specific_integration', 'connection_type']),
             do_debug: prefs_default.do_debug,
@@ -1840,6 +2005,9 @@ async function processEmails(args) {
         // garbage collector can reclaim memory and the UI stays responsive on large selections.
         const CHUNK_SIZE = 5;
         let processedCount = 0;
+        // Spam candidates are queued and analyzed after the loop in batches of
+        // spamfilter_batch_size emails with a single AI call per batch.
+        const spamQueue = [];
 
         for await (let message of messages) {
             // Cooperative cancellation: bail out before doing any heavy work (getFull, ...)
@@ -1885,6 +2053,25 @@ async function processEmails(args) {
                     }
                 }
                 if (!skipAddTags) {
+                    // Sender cache: reuse the tags of previously analyzed mails
+                    // from the same sender instead of running the AI prompt again.
+                    const fromEmail = (message.author.match(/[\w.-]+@[\w.-]+\.\w+/) || [''])[0].toLowerCase();
+                    let cachedTags = null;
+                    if (prefs_aats.add_tags_sender_cache) {
+                        try {
+                            cachedTags = await getCachedSenderData(fromEmail, 'tags');
+                            if (cachedTags) {
+                                taLog.log("[ThunderAI] add_tags sender cache hit for " + fromEmail + ", skipping the AI call.");
+                            }
+                        } catch (err) {
+                            taLog.error("[ThunderAI] add_tags sender cache read failed, falling back to the AI call: " + err);
+                            cachedTags = null;
+                        }
+                    }
+                    if (cachedTags && Array.isArray(cachedTags.tags)) {
+                        let _data = { messageId: message.id, tags: cachedTags.tags };
+                        _assign_tags(_data, !prefs_aats.add_tags_auto_force_existing, prefs_aats.add_tags_exclusions_exact_match);
+                    } else {
                     let specialFullPrompt_add_tags = '';
                     let curr_prompt_add_tags = menus.allPrompts.find(p => p.id === 'prompt_add_tags');
                     let tags_full_list = await getTagsList();
@@ -1925,12 +2112,18 @@ async function processEmails(args) {
                         let tags_current_email = [];
                         try {
                             tags_current_email = taPromptUtils.getTagsFromResponse(await cmd_addTags.sendPrompt(), prefs_aats.add_tags_auto_uselist, prefs_aats.add_tags_auto_uselist_list);
+                            // Store the fresh tags in the sender cache so further mails
+                            // from the same sender skip the AI call.
+                            if (prefs_aats.add_tags_sender_cache) {
+                                await setCachedSenderData(fromEmail, 'tags', { tags: tags_current_email });
+                            }
                         } catch (err) {
                             console.error("[ThunderAI | Auto add_tags] Error getting tags: ", err);
                         }
                         taLog.log("tags_current_email: " + JSON.stringify(tags_current_email));
                         let _data = { messageId: message.id, tags: tags_current_email };
                         _assign_tags(_data, !prefs_aats.add_tags_auto_force_existing, prefs_aats.add_tags_exclusions_exact_match);
+                    }
                     }
                 }
             }
@@ -1956,15 +2149,18 @@ async function processEmails(args) {
                     }
                 }
                 if (!skipSpamFilter) {
-                    await _generateSpamReportForMessage(
-                        message.headerMessageId,
-                        {
-                            messageData: { message, fullMessage: curr_fullMessage, body_text, msg_text },
-                            prefs: prefs_aats,
-                            autoMove: true,
-                            skip_addresses: spamfilter_skip_addresses,
-                            skip_addressbook: spamfilter_skip_addressbook
-                        });
+                    // Sender-based skip checks (no AI involved).
+                    const spamSenderEmail = (message.author.match(/[\w.-]+@[\w.-]+\.\w+/) || [''])[0].toLowerCase();
+                    if (spamfilter_skip_addresses.length > 0 && spamSenderEmail && spamfilter_skip_addresses.includes(spamSenderEmail)) {
+                        taLog.log("Sender " + spamSenderEmail + " is in the skip addresses list, skipping spam filter.");
+                        await _saveSpamSkipReport(message, curr_fullMessage, 'spamfilter_skip_addresses_explanation', prefs_aats);
+                    } else if (spamfilter_skip_addressbook && spamSenderEmail && await _senderInAddressBook(spamSenderEmail)) {
+                        taLog.log("Sender " + spamSenderEmail + " is in the address book, skipping spam filter.");
+                        await _saveSpamSkipReport(message, curr_fullMessage, 'spamfilter_skip_addressbook_explanation', prefs_aats);
+                    } else {
+                        // Queued for the batched spam check (one AI call per chunk).
+                        spamQueue.push({ message, fullMessage: curr_fullMessage, msg_text, body_text, senderEmail: spamSenderEmail });
+                    }
                 }
             }
 
@@ -2014,6 +2210,18 @@ async function processEmails(args) {
                     taLog.log("[ThunderAI] Batch processing cancelled by user (between chunks), stopping.");
                     break;
                 }
+            }
+        }
+
+        // Batched spam check: all queued mails are analyzed in chunks of
+        // spamfilter_batch_size emails with a single AI call per chunk.
+        if (spamFilter && spamQueue.length > 0 && !taBatchController.isCancelled()) {
+            await _processSpamBatchQueue(spamQueue, prefs_aats);
+            // A single panel refresh after the whole batch (results are stored
+            // and reloaded by the display script) — avoids per-result flicker.
+            let activeTabs = await browser.tabs.query({ active: true, currentWindow: true });
+            for (const tab of activeTabs) {
+                browser.tabs.sendMessage(tab.id, { command: "reloadSpamReport" }).catch(() => {});
             }
         }
     }
